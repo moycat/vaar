@@ -1,0 +1,210 @@
+package vaar
+
+import (
+	"archive/tar"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/klauspost/compress/gzip"
+	"github.com/pierrec/lz4/v4"
+	"github.com/pkg/errors"
+)
+
+const (
+	composerDefaultReadAhead = 512
+	composerDefaultBufSize   = 16 << 20 // 16 MiB
+)
+
+// Composer is a tarball creation context.
+type Composer struct {
+	tw        *tar.Writer
+	readAhead int
+	bufSize   int
+	// Compression fields.
+	algorithm   Algorithm
+	level       Level
+	extraCloser io.Closer
+	// Runtime fields.
+	buf []byte
+}
+
+type addOperation struct {
+	header *tar.Header
+	reader io.ReadCloser
+}
+
+// NewComposer creates a Composer with options, writing the tarball to w.
+func NewComposer(w io.Writer, options ...Option) (*Composer, error) {
+	c := &Composer{
+		readAhead: composerDefaultReadAhead,
+		bufSize:   composerDefaultBufSize,
+		level:     DefaultLevel,
+	}
+	// Apply options.
+	for _, option := range options {
+		if err := option(c); err != nil {
+			return nil, err
+		}
+	}
+	// Apply the compression.
+	switch c.algorithm {
+	case GzipAlgorithm:
+		gw, err := gzip.NewWriterLevel(w, int(getCompressionLevel(GzipAlgorithm, c.level)))
+		if err != nil {
+			return nil, errors.WithMessage(err, "failed to create gzip writer")
+		}
+		w = gw
+		c.extraCloser = gw
+	case LZ4Algorithm:
+		lw := lz4.NewWriter(w)
+		if err := lw.Apply(
+			lz4.ConcurrencyOption(-1),
+			lz4.ChecksumOption(false),
+			lz4.CompressionLevelOption(lz4.CompressionLevel(getCompressionLevel(LZ4Algorithm, c.level))),
+		); err != nil {
+			return nil, errors.WithMessage(err, "failed to apply lz4 options")
+		}
+		w = lw
+		c.extraCloser = lw
+	case NoAlgorithm:
+	default:
+		return nil, ErrUnsupportedAlgorithm
+	}
+	c.tw = tar.NewWriter(w)
+	c.buf = make([]byte, c.bufSize)
+	return c, nil
+}
+
+// Add adds a path to the tarball.
+// The path argument is the root path of files being added. If it's a file, only the file is added.
+// The paths of all files are trimmed from the prefix filepath.Dir(path).
+// The base argument is prepended to the paths of all files using filepath.Join.
+// In other words, if you call Add("/a/b/c", "d/e"), all files in /a/b/c are added as d/e/c/... including /a/b/c itself.
+func (c *Composer) Add(path, base string) error {
+	stat, err := os.Lstat(path)
+	if err != nil {
+		return errors.WithMessagef(err, "failed to stat path %s", path)
+	}
+	if !stat.IsDir() {
+		// If the path is a file, just add it and return.
+		linkName, _ := os.Readlink(path)
+		header, err := getTarHeaderFromStat(filepath.Join(base, filepath.Base(path)), linkName, stat)
+		if err != nil {
+			return errors.WithMessagef(err, "failed to generate header for %s", path)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return errors.WithMessagef(err, "failed to open %s", path)
+		}
+		defer func() { _ = file.Close() }()
+		return c.writeFile(header, file)
+	}
+	// Start a goroutine to add files.
+	opCh := make(chan *addOperation, c.readAhead)
+	errCh := make(chan error, 1)
+	doneCh := make(chan struct{})
+	go c.process(opCh, errCh, doneCh)
+	// Walk to do recursive adding.
+	adsPath, err := filepath.Abs(path)
+	if err != nil {
+		return errors.WithMessagef(err, "failed to get absolute path of adsPath")
+	}
+	dirBase := filepath.Dir(adsPath)
+	err = Walk(adsPath, func(filePath, linkName string, stat os.FileInfo, r io.ReadCloser) error {
+		relPath, err := filepath.Rel(dirBase, filePath)
+		if err != nil {
+			return errors.WithMessagef(err, "invalid path %s", filePath)
+		}
+		name := filepath.Join(base, relPath)
+		header, err := getTarHeaderFromStat(name, linkName, stat)
+		if err != nil {
+			return err
+		}
+		select {
+		case opCh <- &addOperation{header: header, reader: r}:
+		case err := <-errCh:
+			return err
+		}
+		return nil
+	})
+	close(opCh)
+	<-doneCh
+	if err != nil {
+		return err
+	}
+	// Here we return either an error sent by a goroutine, or nil.
+	close(errCh)
+	return <-errCh
+}
+
+func (c *Composer) process(opCh <-chan *addOperation, errCh chan<- error, doneCh chan<- struct{}) {
+	defer close(doneCh)
+	for op := range opCh {
+		header, reader := op.header, op.reader
+		err := c.writeFile(header, reader)
+		if reader != nil {
+			_ = reader.Close()
+		}
+		if err != nil {
+			errCh <- errors.WithMessagef(err, "failed to add file %s to tar", header.Name)
+			break
+		}
+	}
+	// On abnormal conditions，we must drain the channel to closed all opened files.
+	for op := range opCh {
+		if op.reader != nil {
+			_ = op.reader.Close()
+		}
+	}
+}
+
+func (c *Composer) writeFile(header *tar.Header, reader io.Reader) error {
+	if err := c.tw.WriteHeader(header); err != nil {
+		return errors.WithMessagef(err, "failed to write header for %s", header.Name)
+	}
+	if header.Typeflag == tar.TypeReg {
+		_, err := io.CopyBuffer(c.tw, reader, c.buf)
+		if err != nil {
+			return errors.WithMessagef(err, "failed to write body for %s", header.Name)
+		}
+	}
+	return nil
+}
+
+// TarWriter returns the underlying tar.Writer.
+// It's for manual operations like adding files only. It mustn't be closed.
+func (c *Composer) TarWriter() *tar.Writer {
+	return c.tw
+}
+
+// Close completes the tarball creation. It must be called to flush the buffered bytes.
+func (c *Composer) Close() error {
+	if c.extraCloser != nil {
+		if err := c.extraCloser.Close(); err != nil {
+			return errors.WithMessage(err, "failed to close compression writer")
+		}
+	}
+	if err := c.tw.Close(); err != nil {
+		return errors.WithMessage(err, "failed to close internal tar writer")
+	}
+	return nil
+}
+
+// TODO: support hard links.
+func getTarHeaderFromStat(name, linkName string, stat os.FileInfo) (*tar.Header, error) {
+	header, err := tar.FileInfoHeader(stat, linkName)
+	if err != nil {
+		return nil, errors.WithMessagef(err, "failed to generate header for file %s", name)
+	}
+	// We need to use the PAX header format to support sub-second timestamps.
+	header.Format = tar.FormatPAX
+	// The filename in fs.FileInfo only has the base name, so we need to modify the name.
+	name = strings.TrimLeft(filepath.ToSlash(name), "/")
+	if err := validateRelPath(name); err != nil {
+		return nil, err
+	}
+	header.Name = name
+	return header, nil
+}
