@@ -1,8 +1,8 @@
 name: Build Vaar
 on: [push, pull_request]
 jobs:
-  build:
-    name: Build with Go ${{ matrix.go }}
+  build_linux:
+    name: Build with Go ${{ matrix.go }} on Ubuntu
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -22,12 +22,32 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
+      - uses: actions/upload-artifact@v2
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.go == '1.17'
+        with:
+          name: vaar_linux
+          path: output/*
+  build_darwin:
+    name: Build with Go ${{ matrix.go }} on macOS
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        go: [ '1.16', '1.17' ]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go }}
       - run: go build -o output/vaar_darwin_amd64 github.com/moycat/vaar/cmd/vaar
         env:
           GOOS: darwin
           GOARCH: amd64
+      - run: go build -o output/vaar_darwin_arm64 github.com/moycat/vaar/cmd/vaar
+        env:
+          GOOS: darwin
+          GOARCH: arm64
       - uses: actions/upload-artifact@v2
         if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.go == '1.17'
         with:
-          name: vaar
+          name: vaar_darwin
           path: output/*
