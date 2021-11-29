@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -15,9 +16,8 @@ import (
 )
 
 const (
-	dentBufSize  = 8 << 20   // 8 MiB
-	adviceSize   = 256 << 10 // 256 KiB
-	symbolBufLen = 255
+	dentBufSize = 8 << 20   // 8 MiB
+	adviceSize  = 256 << 10 // 256 KiB
 )
 
 // WalkFunc is the type of the function called by Walk to visit each file or directory.
@@ -108,13 +108,10 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 			case unix.DT_LNK:
 				// A symlink needs its target.
 				// Also, use readlinkat with the already opened parent directory to save time.
-				// The maximum length of symlink targets is filesystem-dependent, we use a common limit here.
-				linkNameBuf := make([]byte, symbolBufLen)
-				n, err := unix.Readlinkat(dirFd, dent.name, linkNameBuf)
+				linkName, err = readlinkAt(dirFd, dent.name)
 				if err != nil {
 					return errors.WithMessagef(err, "failed to read link name of %s", filePath)
 				}
-				linkName = string(linkNameBuf[:n])
 			}
 			if err := walkFunc(filePath, linkName, fileInfo, reader); err != nil {
 				return err
@@ -210,4 +207,30 @@ func parseStat(name string, t *unix.Stat_t) os.FileInfo {
 	}
 	modTime := time.Unix(t.Mtim.Sec, t.Mtim.Nsec)
 	return &entry{name: name, size: t.Size, mode: mode, modTime: modTime}
+}
+
+// readlinkAt wraps unix.Readlinkat and deal with some subtle situations.
+func readlinkAt(dirFd int, name string) (string, error) {
+	for length := 256; ; length *= 2 {
+		buf := make([]byte, length)
+		var (
+			n   int
+			err error
+		)
+		for {
+			n, err = unix.Readlinkat(dirFd, name, buf)
+			if err != syscall.EINTR {
+				break
+			}
+		}
+		if n <= 0 {
+			n = 0
+		}
+		if err != nil {
+			return "", err
+		}
+		if n < length {
+			return string(buf[:n]), nil
+		}
+	}
 }
