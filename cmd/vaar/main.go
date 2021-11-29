@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/moycat/vaar"
 )
@@ -86,5 +87,15 @@ func main() {
 		create(cmd)
 	case "extract":
 		extract(cmd)
+	}
+}
+
+func init() {
+	// Set the rlimit to maximum.
+	var rlimit syscall.Rlimit
+	_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit)
+	if rlimit.Max > rlimit.Cur {
+		rlimit.Cur = rlimit.Max
+		_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rlimit)
 	}
 }
