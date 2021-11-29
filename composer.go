@@ -2,6 +2,7 @@ package vaar
 
 import (
 	"archive/tar"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/pierrec/lz4/v4"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -53,7 +53,7 @@ func NewComposer(w io.Writer, options ...Option) (*Composer, error) {
 	case GzipAlgorithm:
 		gw, err := gzip.NewWriterLevel(w, int(getCompressionLevel(GzipAlgorithm, c.level)))
 		if err != nil {
-			return nil, errors.WithMessage(err, "failed to create gzip writer")
+			return nil, fmt.Errorf("failed to create gzip writer: %w", err)
 		}
 		w = gw
 		c.extraCloser = gw
@@ -64,7 +64,7 @@ func NewComposer(w io.Writer, options ...Option) (*Composer, error) {
 			lz4.ChecksumOption(false),
 			lz4.CompressionLevelOption(lz4.CompressionLevel(getCompressionLevel(LZ4Algorithm, c.level))),
 		); err != nil {
-			return nil, errors.WithMessage(err, "failed to apply lz4 options")
+			return nil, fmt.Errorf("failed to apply lz4 options: %w", err)
 		}
 		w = lw
 		c.extraCloser = lw
@@ -85,18 +85,18 @@ func NewComposer(w io.Writer, options ...Option) (*Composer, error) {
 func (c *Composer) Add(path, base string) error {
 	stat, err := os.Lstat(path)
 	if err != nil {
-		return errors.WithMessagef(err, "failed to stat path %s", path)
+		return fmt.Errorf("failed to stat path %s: %w", path, err)
 	}
 	if !stat.IsDir() {
 		// If the path is a file, just add it and return.
 		linkName, _ := os.Readlink(path)
 		header, err := getTarHeaderFromStat(filepath.Join(base, filepath.Base(path)), linkName, stat)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to generate header for %s", path)
+			return fmt.Errorf("failed to generate header for %s: %w", path, err)
 		}
 		file, err := os.Open(path)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to open %s", path)
+			return fmt.Errorf("failed to open %s: %w", path, err)
 		}
 		defer func() { _ = file.Close() }()
 		return c.writeFile(header, file)
@@ -109,13 +109,13 @@ func (c *Composer) Add(path, base string) error {
 	// Walk to do recursive adding.
 	adsPath, err := filepath.Abs(path)
 	if err != nil {
-		return errors.WithMessagef(err, "failed to get absolute path of adsPath")
+		return fmt.Errorf("failed to get absolute path of %s: %w", path, err)
 	}
 	dirBase := filepath.Dir(adsPath)
 	err = Walk(adsPath, func(filePath, linkName string, stat os.FileInfo, r io.ReadCloser) error {
 		relPath, err := filepath.Rel(dirBase, filePath)
 		if err != nil {
-			return errors.WithMessagef(err, "invalid path %s", filePath)
+			return fmt.Errorf("invalid path %s: %w", filePath, err)
 		}
 		name := filepath.Join(base, relPath)
 		header, err := getTarHeaderFromStat(name, linkName, stat)
@@ -148,7 +148,7 @@ func (c *Composer) process(opCh <-chan *addOperation, errCh chan<- error, doneCh
 			_ = reader.Close()
 		}
 		if err != nil {
-			errCh <- errors.WithMessagef(err, "failed to add file %s to tar", header.Name)
+			errCh <- fmt.Errorf("failed to add file %s to tar: %w", header.Name, err)
 			break
 		}
 	}
@@ -162,12 +162,12 @@ func (c *Composer) process(opCh <-chan *addOperation, errCh chan<- error, doneCh
 
 func (c *Composer) writeFile(header *tar.Header, reader io.Reader) error {
 	if err := c.tw.WriteHeader(header); err != nil {
-		return errors.WithMessagef(err, "failed to write header for %s", header.Name)
+		return fmt.Errorf("failed to write header for %s: %w", header.Name, err)
 	}
 	if header.Typeflag == tar.TypeReg {
 		_, err := io.CopyBuffer(c.tw, reader, c.buf)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to write body for %s", header.Name)
+			return fmt.Errorf("failed to write body for %s: %w", header.Name, err)
 		}
 	}
 	return nil
@@ -183,11 +183,11 @@ func (c *Composer) TarWriter() *tar.Writer {
 func (c *Composer) Close() error {
 	if c.extraCloser != nil {
 		if err := c.extraCloser.Close(); err != nil {
-			return errors.WithMessage(err, "failed to close compression writer")
+			return fmt.Errorf("failed to close compression writer: %w", err)
 		}
 	}
 	if err := c.tw.Close(); err != nil {
-		return errors.WithMessage(err, "failed to close internal tar writer")
+		return fmt.Errorf("failed to close internal tar writer: %w", err)
 	}
 	return nil
 }
@@ -196,7 +196,7 @@ func (c *Composer) Close() error {
 func getTarHeaderFromStat(name, linkName string, stat os.FileInfo) (*tar.Header, error) {
 	header, err := tar.FileInfoHeader(stat, linkName)
 	if err != nil {
-		return nil, errors.WithMessagef(err, "failed to generate header for file %s", name)
+		return nil, fmt.Errorf("failed to generate header for file %s: %w", name, err)
 	}
 	// We need to use the PAX header format to support sub-second timestamps.
 	header.Format = tar.FormatPAX

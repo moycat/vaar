@@ -3,6 +3,7 @@ package vaar
 import (
 	"archive/tar"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/pierrec/lz4/v4"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -82,14 +82,14 @@ func (res *Resolver) initReader(r io.Reader) error {
 	case GzipAlgorithm:
 		gr, err := gzip.NewReader(r)
 		if err != nil {
-			return errors.WithMessage(err, "failed to create gzip reader")
+			return fmt.Errorf("failed to create gzip reader: %w", err)
 		}
 		r = gr
 		res.extraCloser = gr
 	case LZ4Algorithm:
 		lr := lz4.NewReader(r)
 		if err := lr.Apply(lz4.ConcurrencyOption(-1)); err != nil {
-			return errors.WithMessage(err, "failed to apply lz4 options")
+			return fmt.Errorf("failed to apply lz4 options: %w", err)
 		}
 		r = lr
 	default:
@@ -120,7 +120,7 @@ func (res *Resolver) readStream() error {
 		header, err := res.tr.Next()
 		if err != nil {
 			if err != io.EOF {
-				return errors.WithMessage(err, "failed to read from tar stream")
+				return fmt.Errorf("failed to read from tar stream: %w", err)
 			}
 			return nil
 		}
@@ -137,7 +137,7 @@ func (res *Resolver) readStream() error {
 			}
 			buf := res.bufPool.Get().(*bytes.Buffer)
 			if _, err := buf.ReadFrom(res.tr); err != nil {
-				return errors.WithMessagef(err, "failed to read %s from tar stream", header.Name)
+				return fmt.Errorf("failed to read %s from tar stream: %w", header.Name, err)
 			}
 			op.reader = buf
 		}
@@ -203,7 +203,7 @@ func (res *Resolver) writeFile(header *tar.Header, r io.Reader) error {
 				err = os.Symlink(linkTarget, targetPath)
 			}
 			if err != nil {
-				return errors.WithMessagef(err, "failed to create symlink %s to %s", targetPath, linkTarget)
+				return fmt.Errorf("failed to create symlink %s to %s: %w", targetPath, linkTarget, err)
 			}
 		}
 		_ = chmodSymlink(linkTarget, mode)
@@ -213,19 +213,19 @@ func (res *Resolver) writeFile(header *tar.Header, r io.Reader) error {
 		}
 		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to create file %s", targetPath)
+			return fmt.Errorf("failed to create file %s: %w", targetPath, err)
 		}
 		// FIXME: we should use a copy buffer, but os.File cannot use it.
 		if _, err := io.Copy(file, r); err != nil {
 			_ = file.Close()
-			return errors.WithMessagef(err, "failed to write file %s", name)
+			return fmt.Errorf("failed to write file %s: %w", name, err)
 		}
 		_ = file.Chmod(mode)
 		_ = file.Close()
 		// All errors from chtimes are ignored as some filesystems don't support this.
 		_ = os.Chtimes(targetPath, accessTime, modTime)
 	default:
-		return errors.Errorf("unsupported file type %s", string(header.Typeflag))
+		return fmt.Errorf("unsupported file type %s", string(header.Typeflag))
 	}
 	return nil
 }

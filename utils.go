@@ -1,11 +1,11 @@
 package vaar
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/pierrec/lz4/v4"
-	"github.com/pkg/errors"
 )
 
 func validateRelPath(path string) error {

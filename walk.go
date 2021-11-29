@@ -1,6 +1,7 @@
 package vaar
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -11,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
@@ -41,18 +41,18 @@ func Walk(path string, walkFunc WalkFunc) error {
 	}
 	path, err := filepath.Abs(path)
 	if err != nil {
-		return errors.WithMessage(err, "failed to calculate the absolute path")
+		return fmt.Errorf("failed to calculate the absolute path: %w", err)
 	}
 	// As we only need the file descriptors afterwards, we directly use the syscall.
 	// We should avoid os.OpenFile, because an os.File is closed by Go runtime on GC.
 	dirFd, err := unix.Open(path, os.O_RDONLY|unix.O_DIRECTORY, 0)
 	if err != nil {
-		return errors.WithMessage(err, "failed to open the walk path")
+		return fmt.Errorf("failed to open the walk path: %w", err)
 	}
 	// The root path needs manual walk.
 	var stat unix.Stat_t
 	if err := unix.Fstat(dirFd, &stat); err != nil {
-		return errors.WithMessage(err, "failed to stat the walk path")
+		return fmt.Errorf("failed to stat the walk path: %w", err)
 	}
 	if err := walkFunc(path, "", parseStat(filepath.Base(path), &stat), nil); err != nil {
 		return err
@@ -73,7 +73,7 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 		// The buffer size in os.ReadDir is 8 KiB and is too small, causing many unnecessary syscall operations.
 		n, err := unix.ReadDirent(dirFd, buf)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to call getdents64 on %s", dirName)
+			return fmt.Errorf("failed to call getdents64 on %s: %w", dirName, err)
 		}
 		if n == 0 {
 			return nil
@@ -86,7 +86,7 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 			var stat unix.Stat_t
 			err := unix.Fstatat(dirFd, dent.name, &stat, unix.AT_SYMLINK_NOFOLLOW)
 			if err != nil {
-				return errors.WithMessagef(err, "failed to stat %s in %s", dent.name, dirName)
+				return fmt.Errorf("failed to stat %s in %s: %w", dent.name, dirName, err)
 			}
 			fileInfo := parseStat(dent.name, &stat)
 			filePath := filepath.Join(dirName, dent.name)
@@ -100,7 +100,7 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 				// Also, use openat with the the already opened parent directory to save time.
 				fd, err := unix.Openat(dirFd, dent.name, os.O_RDONLY, 0)
 				if err != nil {
-					return errors.WithMessagef(err, "failed to open %s for reading", filePath)
+					return fmt.Errorf("failed to open %s for reading: %w", filePath, err)
 				}
 				reader = os.NewFile(uintptr(fd), dent.name)
 				// Issue a read ahead instruction to the kernel to prefetch the file content.
@@ -110,7 +110,7 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 				// Also, use readlinkat with the already opened parent directory to save time.
 				linkName, err = readlinkAt(dirFd, dent.name)
 				if err != nil {
-					return errors.WithMessagef(err, "failed to read link name of %s", filePath)
+					return fmt.Errorf("failed to read link name of %s: %w", filePath, err)
 				}
 			}
 			if err := walkFunc(filePath, linkName, fileInfo, reader); err != nil {
@@ -121,7 +121,7 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 				// Also, use openat with the already opened parent directory to save time.
 				nextDirFd, err := unix.Openat(dirFd, dent.name, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 				if err != nil {
-					return errors.WithMessagef(err, "failed to open directory %s in %s", dent.name, dirName)
+					return fmt.Errorf("failed to open directory %s in %s: %w", dent.name, dirName, err)
 				}
 				if err := walk(filePath, nextDirFd, dentBufPool, walkFunc); err != nil {
 					return err

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/moycat/vaar"
-	"github.com/pkg/errors"
 )
 
 type algorithmArg struct {
@@ -27,7 +26,7 @@ func (arg *algorithmArg) Set(s string) error {
 	case "lz4":
 		arg.value = vaar.LZ4Algorithm
 	default:
-		return errors.Errorf("unknown algorithm '%s'", s)
+		return fmt.Errorf("unknown algorithm '%s'", s)
 	}
 	return nil
 }
@@ -53,7 +52,7 @@ func (arg *levelArg) Set(s string) error {
 	case "best":
 		arg.value = vaar.BestLevel
 	default:
-		return errors.Errorf("unknown algorithm level: '%s'", s)
+		return fmt.Errorf("unknown algorithm level: '%s'", s)
 	}
 	return nil
 }

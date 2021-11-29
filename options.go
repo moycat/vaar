@@ -1,8 +1,6 @@
 package vaar
 
-import (
-	"github.com/pkg/errors"
-)
+import "errors"
 
 // WithCompression provides the compression algorithm of tar creation and extraction.
 func WithCompression(algorithm Algorithm) Option {
