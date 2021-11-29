@@ -152,7 +152,7 @@ func (c *Composer) process(opCh <-chan *addOperation, errCh chan<- error, doneCh
 			break
 		}
 	}
-	// On abnormal conditions，we must drain the channel to closed all opened files.
+	// On abnormal conditions，we must drain the channel to close all opened files.
 	for op := range opCh {
 		if op.reader != nil {
 			_ = op.reader.Close()

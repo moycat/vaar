@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// readAhead tells the kernel about reading a file in the near future, by issuing a F_RDAHEAD and a F_RDADVISE command.
+// readAhead tells the kernel about reading a file in the near future, by issuing F_RDAHEAD and F_RDADVISE commands.
 func readAhead(fd, size int) error {
 	_, err := unix.FcntlInt(uintptr(fd), unix.F_RDAHEAD, 1)
 	if err != nil {

@@ -128,7 +128,7 @@ func (res *Resolver) readStream() error {
 		if header.Typeflag == tar.TypeReg {
 			// This is a regular file. We need to decide whether to buffer its content and write it asynchronously.
 			if header.Size > res.threshold {
-				// Too big to buffered. Write it in this thread.
+				// Too big to be buffered. Write it in this thread.
 				err := res.writeFile(header, res.tr)
 				if err != nil {
 					return err

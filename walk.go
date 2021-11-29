@@ -60,7 +60,7 @@ func Walk(path string, walkFunc WalkFunc) error {
 	return walk(path, dirFd, dentBufPool, walkFunc)
 }
 
-// walk does the real walking stuff. It receives a opened directory and iterates the items in it.
+// walk does the real walking stuff. It receives an opened directory and iterates the items in it.
 func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) error {
 	buf := dentBufPool.Get().([]byte)
 	defer func() {
@@ -97,7 +97,7 @@ func walk(dirName string, dirFd int, dentBufPool *sync.Pool, walkFunc WalkFunc) 
 			switch dent.typ {
 			case unix.DT_REG:
 				// A regular file should be opened for reading.
-				// Also, use openat with the the already opened parent directory to save time.
+				// Also, use openat with the already opened parent directory to save time.
 				fd, err := unix.Openat(dirFd, dent.name, os.O_RDONLY, 0)
 				if err != nil {
 					return fmt.Errorf("failed to open %s for reading: %w", filePath, err)
