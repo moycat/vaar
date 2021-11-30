@@ -47,6 +47,7 @@ linters:
 
 issues:
   fix: true
+  new: true
   exclude-rules:
     - path: _test\.go # disable some linters for test files
       linters:
@@ -56,9 +57,6 @@ issues:
     - linters:
         - gosec
       text: "weak cryptographic primitive"
-    - linters:
-        - stylecheck
-      text: "error strings should not be capitalized"
 
   max-issues-per-linter: 0
   max-same-issues: 0
