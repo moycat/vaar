@@ -1,0 +1,17 @@
+name: Test Vaar
+on: [ push, pull_request ]
+jobs:
+  test_linux:
+    name: Test with Go ${{ matrix.go }} on ${{ matrix.os }}
+    strategy:
+      matrix:
+        go: [ '1.16', '1.17' ]
+        os: [ 'ubuntu-latest', 'macos-latest' ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go fmt ./... && go mod tidy && git diff --exit-code
+      - run: go test -cover -race ./...

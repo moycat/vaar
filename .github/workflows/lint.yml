@@ -1,5 +1,5 @@
 name: Lint Vaar
-on: [push, pull_request]
+on: [ push, pull_request ]
 permissions:
   contents: read
   pull-requests: read

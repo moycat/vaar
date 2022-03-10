@@ -46,8 +46,6 @@ linters:
     - whitespace
 
 issues:
-  fix: true
-  new: true
   exclude-rules:
     - path: _test\.go # disable some linters for test files
       linters:
