@@ -9,41 +9,66 @@ type private interface{}
 
 type Option func(i private) error
 
-// dirent implements os.FileInfo.
 type dirent struct {
 	ino  uint64
 	name string
 	typ  byte
 }
 
-type entry struct {
-	name    string
-	size    int64
-	mode    os.FileMode
-	modTime time.Time
-	sys     interface{}
+// Entry represents a file, used in WalkFunc, specialized for tar headers.
+type Entry struct {
+	name     string
+	size     int64
+	mode     os.FileMode
+	modTime  time.Time
+	sys      interface{}
+	linkname string
+	uid      uint32
+	gid      uint32
+	uname    string
+	gname    string
 }
 
-func (e *entry) Name() string {
+func (e *Entry) Name() string {
 	return e.name
 }
 
-func (e *entry) Size() int64 {
+func (e *Entry) Size() int64 {
 	return e.size
 }
 
-func (e *entry) Mode() os.FileMode {
+func (e *Entry) Mode() os.FileMode {
 	return e.mode
 }
 
-func (e *entry) ModTime() time.Time {
+func (e *Entry) ModTime() time.Time {
 	return e.modTime
 }
 
-func (e *entry) IsDir() bool {
+func (e *Entry) IsDir() bool {
 	return e.mode&os.ModeDir != 0
 }
 
-func (e *entry) Sys() interface{} {
-	return e.sys
+func (e *Entry) Sys() interface{} {
+	return nil
+}
+
+func (e *Entry) Linkname() string {
+	return e.linkname
+}
+
+func (e *Entry) OwnerID() uint32 {
+	return e.uid
+}
+
+func (e *Entry) GroupID() uint32 {
+	return e.gid
+}
+
+func (e *Entry) Owner() string {
+	return e.uname
+}
+
+func (e *Entry) Group() string {
+	return e.gname
 }

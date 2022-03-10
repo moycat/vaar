@@ -83,14 +83,13 @@ func NewComposer(w io.Writer, options ...Option) (*Composer, error) {
 // The base argument is prepended to the paths of all files using filepath.Join.
 // In other words, if you call Add("/a/b/c", "d/e"), all files in /a/b/c are added as d/e/c/... including /a/b/c itself.
 func (c *Composer) Add(path, base string) error {
-	stat, err := os.Lstat(path)
+	entry, err := Stat(path)
 	if err != nil {
-		return fmt.Errorf("failed to stat path %s: %w", path, err)
+		return err
 	}
-	if !stat.IsDir() {
+	if !entry.IsDir() {
 		// If the path is a file, just add it and return.
-		linkName, _ := os.Readlink(path)
-		header, err := getTarHeaderFromStat(filepath.Join(base, filepath.Base(path)), linkName, stat)
+		header, err := getTarHeaderFromEntry(filepath.Join(base, filepath.Base(path)), entry)
 		if err != nil {
 			return fmt.Errorf("failed to generate header for %s: %w", path, err)
 		}
@@ -112,13 +111,13 @@ func (c *Composer) Add(path, base string) error {
 		return fmt.Errorf("failed to get absolute path of %s: %w", path, err)
 	}
 	dirBase := filepath.Dir(adsPath)
-	err = Walk(adsPath, func(filePath, linkName string, stat os.FileInfo, r io.ReadCloser) error {
-		relPath, err := filepath.Rel(dirBase, filePath)
+	err = Walk(adsPath, func(path string, entry *Entry, r io.ReadCloser) error {
+		relPath, err := filepath.Rel(dirBase, path)
 		if err != nil {
-			return fmt.Errorf("invalid path %s: %w", filePath, err)
+			return fmt.Errorf("invalid path %s: %w", path, err)
 		}
 		name := filepath.Join(base, relPath)
-		header, err := getTarHeaderFromStat(name, linkName, stat)
+		header, err := getTarHeaderFromEntry(name, entry)
 		if err != nil {
 			return err
 		}
@@ -193,8 +192,8 @@ func (c *Composer) Close() error {
 }
 
 // TODO: support hard links.
-func getTarHeaderFromStat(name, linkName string, stat os.FileInfo) (*tar.Header, error) {
-	header, err := tar.FileInfoHeader(stat, linkName)
+func getTarHeaderFromEntry(name string, entry *Entry) (*tar.Header, error) {
+	header, err := tar.FileInfoHeader(entry, entry.linkname)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate header for file %s: %w", name, err)
 	}
@@ -206,5 +205,10 @@ func getTarHeaderFromStat(name, linkName string, stat os.FileInfo) (*tar.Header,
 		return nil, err
 	}
 	header.Name = name
+	// Fill in the owner fields.
+	header.Uid = int(entry.uid)
+	header.Gid = int(entry.gid)
+	header.Uname = entry.uname
+	header.Gname = entry.gname
 	return header, nil
 }

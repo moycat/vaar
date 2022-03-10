@@ -12,6 +12,6 @@ func readAhead(fd, size int) error {
 }
 
 // chmodSymlink does nothing, as Linux doesn't support file modes of symlinks.
-func chmodSymlink(path string, mode os.FileMode) error {
+func chmodSymlink(_ string, _ os.FileMode) error {
 	return nil
 }

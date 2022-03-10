@@ -170,7 +170,6 @@ func (res *Resolver) writeBuffer() {
 
 // writeFile performs the actual write operation, either the synchronous ones and the asynchronous ones.
 // Currently, we support directories, regular files, symlinks and hard links.
-// TODO: shall we populate UID & GID fields?
 func (res *Resolver) writeFile(header *tar.Header, r io.Reader) error {
 	name := strings.TrimLeft(header.Name, "/") // Leading slashes are trimmed to make the paths relative.
 	if err := validateRelPath(name); err != nil {
@@ -189,6 +188,7 @@ func (res *Resolver) writeFile(header *tar.Header, r io.Reader) error {
 		// All errors from chmod are ignored as some filesystems don't support this.
 		// FIXME: if the recorded permission denies write, subsequent writes in this directory fail.
 		_ = os.Chmod(targetPath, mode)
+		_ = os.Chown(targetPath, header.Uid, header.Gid)
 	case tar.TypeLink:
 		// FIXME: we should try to support real hard links. As the target may not exist yet, we create symlinks instead.
 		fallthrough
@@ -221,6 +221,7 @@ func (res *Resolver) writeFile(header *tar.Header, r io.Reader) error {
 			return fmt.Errorf("failed to write file %s: %w", name, err)
 		}
 		_ = file.Chmod(mode)
+		_ = file.Chown(header.Uid, header.Gid)
 		_ = file.Close()
 		// All errors from chtimes are ignored as some filesystems don't support this.
 		_ = os.Chtimes(targetPath, accessTime, modTime)
